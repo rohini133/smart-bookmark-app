@@ -3,8 +3,18 @@ import AuthButton from '@/components/AuthButton'
 import BookmarksList from '@/components/BookmarksList'
 import AddBookmarkForm from '@/components/AddBookmarkForm'
 
-export default async function Home() {
+interface HomeProps {
+  searchParams?: { error?: string }
+}
+
+export default async function Home({ searchParams }: HomeProps = {}) {
   const supabase = await createClient()
+
+  // If there's a code parameter, redirect to callback (shouldn't happen, but just in case)
+  if (searchParams && 'code' in searchParams) {
+    const { redirect } = await import('next/navigation')
+    redirect(`/auth/callback?code=${searchParams.code}`)
+  }
 
   const {
     data: { user },
@@ -20,6 +30,11 @@ export default async function Home() {
           <p className="text-center text-gray-600 mb-6">
             Sign in with Google to manage your bookmarks
           </p>
+          {searchParams?.error === 'auth_failed' && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm text-center">
+              Authentication failed. Please try again.
+            </div>
+          )}
           <AuthButton />
         </div>
       </main>
