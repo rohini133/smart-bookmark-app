@@ -4,14 +4,14 @@ import BookmarksList from '@/components/BookmarksList'
 import AddBookmarkForm from '@/components/AddBookmarkForm'
 
 interface HomeProps {
-  searchParams?: { error?: string }
+  searchParams: { error?: string; code?: string }
 }
 
-export default async function Home({ searchParams }: HomeProps = {}) {
+export default async function Home({ searchParams }: HomeProps) {
   const supabase = await createClient()
 
   // If there's a code parameter, redirect to callback (shouldn't happen, but just in case)
-  if (searchParams && 'code' in searchParams) {
+  if (searchParams?.code) {
     const { redirect } = await import('next/navigation')
     redirect(`/auth/callback?code=${searchParams.code}`)
   }
