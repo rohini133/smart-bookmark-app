@@ -1,4 +1,3 @@
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import AuthButton from '@/components/AuthButton'
 import BookmarksList from '@/components/BookmarksList'

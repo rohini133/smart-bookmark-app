@@ -2,11 +2,13 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 
-export default function AddBookmarkForm() {
+interface AddBookmarkFormProps {
+  onBookmarkAdded?: () => void
+}
+
+export default function AddBookmarkForm({ onBookmarkAdded }: AddBookmarkFormProps) {
   const supabase = createClient()
-  const router = useRouter()
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(false)
@@ -40,21 +42,47 @@ export default function AddBookmarkForm() {
         return
       }
 
-      const { error: insertError } = await supabase.from('bookmarks').insert({
-        url: validUrl,
-        title: title.trim() || validUrl,
-        user_id: user.id,
-      })
+      const { data: insertData, error: insertError } = await supabase
+        .from('bookmarks')
+        .insert({
+          url: validUrl,
+          title: title.trim() || validUrl,
+          user_id: user.id,
+        })
+        .select()
 
       if (insertError) {
+        console.error('Insert error:', insertError)
         throw insertError
       }
 
+      console.log('Bookmark inserted successfully:', insertData)
       setUrl('')
       setTitle('')
-      router.refresh()
+      
+      // Notify parent component to refresh bookmarks
+      if (onBookmarkAdded) {
+        onBookmarkAdded()
+      }
+      
+      // Also dispatch a custom event with the new bookmark data for immediate UI update
+      if (insertData && insertData.length > 0) {
+        window.dispatchEvent(new CustomEvent('bookmarkAdded', { 
+          detail: insertData[0] 
+        }))
+      }
     } catch (err: any) {
-      setError(err.message || 'Failed to add bookmark')
+      console.error('Error adding bookmark:', err)
+      const errorMessage = err.message || 'Failed to add bookmark'
+      
+      // Provide more helpful error messages
+      if (errorMessage.includes('relation') || errorMessage.includes('does not exist')) {
+        setError('Database table not found. Please run the SQL schema in Supabase (see DATABASE_SETUP.md)')
+      } else if (errorMessage.includes('permission') || errorMessage.includes('policy')) {
+        setError('Permission denied. Please check Row Level Security policies in Supabase.')
+      } else {
+        setError(errorMessage)
+      }
     } finally {
       setLoading(false)
     }
