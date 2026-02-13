@@ -59,7 +59,7 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
   useEffect(() => {
     fetchBookmarks()
 
-    // Listen for custom bookmark added events (for immediate UI update)
+    // Listen for custom bookmark added events (for immediate UI update in same tab)
     const handleBookmarkAdded = (event: Event) => {
       const customEvent = event as CustomEvent<Bookmark>
       if (customEvent.detail) {
@@ -80,9 +80,14 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
     
     window.addEventListener('bookmarkAdded', handleBookmarkAdded)
 
-    // Set up real-time subscription
+    // Set up real-time subscription for cross-tab updates
+    const channelName = `bookmarks-changes-${userId}`
     const channel = supabase
-      .channel('bookmarks-changes')
+      .channel(channelName, {
+        config: {
+          broadcast: { self: false },
+        },
+      })
       .on(
         'postgres_changes',
         {
@@ -92,30 +97,69 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
           filter: `user_id=eq.${userId}`,
         },
         (payload) => {
-          console.log('Real-time update:', payload)
+          console.log('Real-time update received:', payload)
           
           // Handle different event types
           if (payload.eventType === 'INSERT') {
             // New bookmark added - add it to state immediately
-            const newBookmark = payload.new as Bookmark
-            setBookmarks((prevBookmarks) => [newBookmark, ...prevBookmarks])
+            const newBookmarkData = payload.new as any
+            console.log('INSERT event - adding bookmark:', newBookmarkData)
+            
+            // Validate the bookmark has required fields and belongs to this user
+            if (newBookmarkData && newBookmarkData.id && newBookmarkData.user_id === userId) {
+              const newBookmark: Bookmark = {
+                id: newBookmarkData.id,
+                url: newBookmarkData.url,
+                title: newBookmarkData.title,
+                created_at: newBookmarkData.created_at,
+              }
+              
+              setBookmarks((prevBookmarks) => {
+                // Check if bookmark already exists (avoid duplicates)
+                if (prevBookmarks.some(b => b.id === newBookmark.id)) {
+                  console.log('Bookmark already exists, skipping duplicate')
+                  return prevBookmarks
+                }
+                // Add new bookmark at the beginning (most recent first)
+                console.log('Adding new bookmark to list')
+                return [newBookmark, ...prevBookmarks]
+              })
+            } else {
+              console.warn('Invalid bookmark data in INSERT event, refreshing list')
+              fetchBookmarks()
+            }
           } else if (payload.eventType === 'DELETE') {
             // Bookmark deleted - remove it from state
+            console.log('DELETE event - removing bookmark:', payload.old.id)
             setBookmarks((prevBookmarks) =>
               prevBookmarks.filter((bookmark) => bookmark.id !== payload.old.id)
             )
           } else if (payload.eventType === 'UPDATE') {
             // Bookmark updated - refresh to get updated data
+            console.log('UPDATE event - refreshing bookmarks')
             fetchBookmarks()
           } else {
             // Fallback: refresh all bookmarks
+            console.log('Unknown event type, refreshing bookmarks')
             fetchBookmarks()
           }
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status)
+        if (status === 'SUBSCRIBED') {
+          console.log('Successfully subscribed to realtime updates')
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('Error subscribing to realtime updates')
+        } else if (status === 'TIMED_OUT') {
+          console.warn('Realtime subscription timed out')
+        } else if (status === 'CLOSED') {
+          console.log('Realtime subscription closed')
+        }
+      })
 
     return () => {
+      console.log('Cleaning up realtime subscription')
       supabase.removeChannel(channel)
       window.removeEventListener('bookmarkAdded', handleBookmarkAdded)
     }
