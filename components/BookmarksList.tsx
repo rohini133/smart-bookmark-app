@@ -64,59 +64,82 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
   }, [fetchBookmarks])
 
   useEffect(() => {
-    if (!userId) return
+    console.log('🚀 BookmarksList useEffect triggered, userId:', userId)
+    
+    if (!userId) {
+      console.log('⚠️ No userId provided, skipping realtime subscription')
+      return
+    }
+
+    console.log('✅ userId is valid, proceeding with subscription setup')
 
     // Initial fetch
     fetchBookmarks()
 
     // Set up real-time subscription for cross-tab updates
     const channelName = `bookmarks-changes-${userId}`
-    console.log('Setting up realtime subscription for channel:', channelName)
+    console.log('🔧 Setting up realtime subscription for channel:', channelName)
+    console.log('🔧 User ID:', userId)
+    console.log('🔧 Supabase client:', supabase ? 'available' : 'missing')
     
-    const channel = supabase
-      .channel(channelName, {
-        config: {
-          broadcast: { self: false },
-        },
-      })
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'bookmarks',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          console.log('🔔 Real-time update received:', payload)
-          console.log('Event type:', payload.eventType)
-          console.log('Payload data:', payload.new || payload.old)
-          // Re-fetch bookmarks on any event (INSERT, DELETE, UPDATE)
-          // Use ref to get the latest fetchBookmarks function
-          if (fetchBookmarksRef.current) {
-            console.log('🔄 Re-fetching bookmarks due to realtime update...')
-            fetchBookmarksRef.current()
+    let channel: ReturnType<typeof supabase.channel>
+    
+    try {
+      channel = supabase
+        .channel(channelName, {
+          config: {
+            broadcast: { self: false },
+          },
+        })
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'bookmarks',
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            console.log('🔔 Real-time update received:', payload)
+            console.log('Event type:', payload.eventType)
+            console.log('Payload data:', payload.new || payload.old)
+            // Re-fetch bookmarks on any event (INSERT, DELETE, UPDATE)
+            // Use ref to get the latest fetchBookmarks function
+            if (fetchBookmarksRef.current) {
+              console.log('🔄 Re-fetching bookmarks due to realtime update...')
+              fetchBookmarksRef.current()
+            } else {
+              console.warn('⚠️ fetchBookmarksRef.current is not available')
+            }
           }
-        }
-      )
-      .subscribe((status, err) => {
-        console.log('📡 Realtime subscription status:', status)
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Successfully subscribed to realtime updates for user:', userId)
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('❌ Error subscribing to realtime updates:', err)
-          console.error('💡 Make sure Realtime is enabled for the bookmarks table in Supabase Dashboard')
-          console.error('💡 Go to: Database → Replication → Enable for bookmarks table')
-        } else if (status === 'TIMED_OUT') {
-          console.warn('⏱️ Realtime subscription timed out')
-        } else if (status === 'CLOSED') {
-          console.log('🔒 Realtime subscription closed')
-        }
-      })
+        )
+        .subscribe((status, err) => {
+          console.log('📡 Realtime subscription status:', status)
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Successfully subscribed to realtime updates for user:', userId)
+            console.log('✅ Channel name:', channelName)
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Error subscribing to realtime updates:', err)
+            console.error('💡 Make sure Realtime is enabled for the bookmarks table in Supabase Dashboard')
+            console.error('💡 Go to: Database → Replication → Enable for bookmarks table')
+            console.error('💡 Or run this SQL: ALTER PUBLICATION supabase_realtime ADD TABLE bookmarks;')
+          } else if (status === 'TIMED_OUT') {
+            console.warn('⏱️ Realtime subscription timed out')
+            console.warn('💡 This might indicate a network issue or Realtime is not enabled')
+          } else if (status === 'CLOSED') {
+            console.log('🔒 Realtime subscription closed')
+          }
+        })
+    } catch (error) {
+      console.error('❌ Failed to create realtime subscription:', error)
+      return
+    }
 
     return () => {
-      console.log('Cleaning up realtime subscription')
-      supabase.removeChannel(channel)
+      console.log('🧹 Cleaning up realtime subscription for channel:', channelName)
+      if (channel) {
+        supabase.removeChannel(channel)
+      }
     }
   }, [userId]) // Only depend on userId, not fetchBookmarks
 
