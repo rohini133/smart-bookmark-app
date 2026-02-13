@@ -1,6 +1,6 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
+import { supabase } from '@/lib/supabase/client'
 import { useState } from 'react'
 
 interface AddBookmarkFormProps {
@@ -8,7 +8,6 @@ interface AddBookmarkFormProps {
 }
 
 export default function AddBookmarkForm({ onBookmarkAdded }: AddBookmarkFormProps) {
-  const supabase = createClient()
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(false)
@@ -60,16 +59,9 @@ export default function AddBookmarkForm({ onBookmarkAdded }: AddBookmarkFormProp
       setUrl('')
       setTitle('')
       
-      // Notify parent component to refresh bookmarks
+      // Notify parent component to refresh bookmarks (optional, realtime will handle it)
       if (onBookmarkAdded) {
         onBookmarkAdded()
-      }
-      
-      // Also dispatch a custom event with the new bookmark data for immediate UI update
-      if (insertData && insertData.length > 0) {
-        window.dispatchEvent(new CustomEvent('bookmarkAdded', { 
-          detail: insertData[0] 
-        }))
       }
     } catch (err: any) {
       console.error('Error adding bookmark:', err)

@@ -1,6 +1,6 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
+import { supabase } from '@/lib/supabase/client'
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -16,7 +16,6 @@ interface BookmarksListProps {
 }
 
 export default function BookmarksList({ userId }: BookmarksListProps) {
-  const supabase = createClient()
   const router = useRouter()
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,40 +53,15 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
     } finally {
       setLoading(false)
     }
-  }, [userId, supabase])
+  }, [userId])
 
   useEffect(() => {
     fetchBookmarks()
 
-    // Listen for custom bookmark added events (for immediate UI update in same tab)
-    const handleBookmarkAdded = (event: Event) => {
-      const customEvent = event as CustomEvent<Bookmark>
-      if (customEvent.detail) {
-        console.log('Bookmark added event received, adding to list:', customEvent.detail)
-        // Add the new bookmark immediately to the list
-        setBookmarks((prevBookmarks) => {
-          // Check if bookmark already exists (avoid duplicates)
-          if (prevBookmarks.some(b => b.id === customEvent.detail.id)) {
-            return prevBookmarks
-          }
-          return [customEvent.detail, ...prevBookmarks]
-        })
-      } else {
-        // Fallback: refresh if no detail provided
-        fetchBookmarks()
-      }
-    }
-    
-    window.addEventListener('bookmarkAdded', handleBookmarkAdded)
-
     // Set up real-time subscription for cross-tab updates
     const channelName = `bookmarks-changes-${userId}`
     const channel = supabase
-      .channel(channelName, {
-        config: {
-          broadcast: { self: false },
-        },
-      })
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
@@ -98,51 +72,8 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
         },
         (payload) => {
           console.log('Real-time update received:', payload)
-          
-          // Handle different event types
-          if (payload.eventType === 'INSERT') {
-            // New bookmark added - add it to state immediately
-            const newBookmarkData = payload.new as any
-            console.log('INSERT event - adding bookmark:', newBookmarkData)
-            
-            // Validate the bookmark has required fields and belongs to this user
-            if (newBookmarkData && newBookmarkData.id && newBookmarkData.user_id === userId) {
-              const newBookmark: Bookmark = {
-                id: newBookmarkData.id,
-                url: newBookmarkData.url,
-                title: newBookmarkData.title,
-                created_at: newBookmarkData.created_at,
-              }
-              
-              setBookmarks((prevBookmarks) => {
-                // Check if bookmark already exists (avoid duplicates)
-                if (prevBookmarks.some(b => b.id === newBookmark.id)) {
-                  console.log('Bookmark already exists, skipping duplicate')
-                  return prevBookmarks
-                }
-                // Add new bookmark at the beginning (most recent first)
-                console.log('Adding new bookmark to list')
-                return [newBookmark, ...prevBookmarks]
-              })
-            } else {
-              console.warn('Invalid bookmark data in INSERT event, refreshing list')
-              fetchBookmarks()
-            }
-          } else if (payload.eventType === 'DELETE') {
-            // Bookmark deleted - remove it from state
-            console.log('DELETE event - removing bookmark:', payload.old.id)
-            setBookmarks((prevBookmarks) =>
-              prevBookmarks.filter((bookmark) => bookmark.id !== payload.old.id)
-            )
-          } else if (payload.eventType === 'UPDATE') {
-            // Bookmark updated - refresh to get updated data
-            console.log('UPDATE event - refreshing bookmarks')
-            fetchBookmarks()
-          } else {
-            // Fallback: refresh all bookmarks
-            console.log('Unknown event type, refreshing bookmarks')
-            fetchBookmarks()
-          }
+          // Re-fetch bookmarks on any event (INSERT, DELETE, UPDATE)
+          fetchBookmarks()
         }
       )
       .subscribe((status) => {
@@ -161,17 +92,13 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
     return () => {
       console.log('Cleaning up realtime subscription')
       supabase.removeChannel(channel)
-      window.removeEventListener('bookmarkAdded', handleBookmarkAdded)
     }
-  }, [userId, supabase, fetchBookmarks])
+  }, [userId, fetchBookmarks])
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this bookmark?')) {
       return
     }
-
-    // Optimistically remove the bookmark from UI immediately
-    setBookmarks((prevBookmarks) => prevBookmarks.filter((bookmark) => bookmark.id !== id))
 
     try {
       const { error } = await supabase
@@ -181,18 +108,16 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
         .eq('user_id', userId)
 
       if (error) {
-        // If delete fails, restore the bookmark and show error
-        fetchBookmarks()
         throw error
       }
 
-      // Real-time subscription will handle the update, but we've already optimistically updated
+      // Real-time subscription will handle the update
       console.log('Bookmark deleted successfully')
     } catch (err: any) {
       console.error('Error deleting bookmark:', err)
-      // Restore bookmarks on error
-      fetchBookmarks()
       alert(err.message || 'Failed to delete bookmark')
+      // Re-fetch to ensure UI is in sync
+      fetchBookmarks()
     }
   }
 

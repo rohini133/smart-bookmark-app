@@ -1,12 +1,11 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
+import { supabase } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
 export default function AuthButton() {
   const router = useRouter()
-  const supabase = createClient()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
@@ -29,7 +28,7 @@ export default function AuthButton() {
     })
 
     return () => subscription.unsubscribe()
-  }, [router, supabase])
+  }, [router])
 
   const handleSignIn = async () => {
     try {
