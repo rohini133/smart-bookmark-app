@@ -1,7 +1,7 @@
 'use client'
 
 import { supabase } from '@/lib/supabase/client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
 interface Bookmark {
@@ -20,6 +20,9 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Use ref to store the latest fetchBookmarks function
+  const fetchBookmarksRef = useRef<() => Promise<void>>()
 
   const fetchBookmarks = useCallback(async () => {
     try {
@@ -55,13 +58,27 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
     }
   }, [userId])
 
+  // Update ref whenever fetchBookmarks changes
   useEffect(() => {
+    fetchBookmarksRef.current = fetchBookmarks
+  }, [fetchBookmarks])
+
+  useEffect(() => {
+    if (!userId) return
+
+    // Initial fetch
     fetchBookmarks()
 
     // Set up real-time subscription for cross-tab updates
     const channelName = `bookmarks-changes-${userId}`
+    console.log('Setting up realtime subscription for channel:', channelName)
+    
     const channel = supabase
-      .channel(channelName)
+      .channel(channelName, {
+        config: {
+          broadcast: { self: false },
+        },
+      })
       .on(
         'postgres_changes',
         {
@@ -71,21 +88,29 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
           filter: `user_id=eq.${userId}`,
         },
         (payload) => {
-          console.log('Real-time update received:', payload)
+          console.log('🔔 Real-time update received:', payload)
+          console.log('Event type:', payload.eventType)
+          console.log('Payload data:', payload.new || payload.old)
           // Re-fetch bookmarks on any event (INSERT, DELETE, UPDATE)
-          fetchBookmarks()
+          // Use ref to get the latest fetchBookmarks function
+          if (fetchBookmarksRef.current) {
+            console.log('🔄 Re-fetching bookmarks due to realtime update...')
+            fetchBookmarksRef.current()
+          }
         }
       )
-      .subscribe((status) => {
-        console.log('Realtime subscription status:', status)
+      .subscribe((status, err) => {
+        console.log('📡 Realtime subscription status:', status)
         if (status === 'SUBSCRIBED') {
-          console.log('Successfully subscribed to realtime updates')
+          console.log('✅ Successfully subscribed to realtime updates for user:', userId)
         } else if (status === 'CHANNEL_ERROR') {
-          console.error('Error subscribing to realtime updates')
+          console.error('❌ Error subscribing to realtime updates:', err)
+          console.error('💡 Make sure Realtime is enabled for the bookmarks table in Supabase Dashboard')
+          console.error('💡 Go to: Database → Replication → Enable for bookmarks table')
         } else if (status === 'TIMED_OUT') {
-          console.warn('Realtime subscription timed out')
+          console.warn('⏱️ Realtime subscription timed out')
         } else if (status === 'CLOSED') {
-          console.log('Realtime subscription closed')
+          console.log('🔒 Realtime subscription closed')
         }
       })
 
@@ -93,7 +118,7 @@ export default function BookmarksList({ userId }: BookmarksListProps) {
       console.log('Cleaning up realtime subscription')
       supabase.removeChannel(channel)
     }
-  }, [userId, fetchBookmarks])
+  }, [userId]) // Only depend on userId, not fetchBookmarks
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this bookmark?')) {
