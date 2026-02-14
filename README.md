@@ -93,16 +93,98 @@ A simple bookmark manager built with Next.js, Supabase, and Tailwind CSS. Featur
 
 ## Problems Encountered and Solutions
 
-### Problem 1: Real-time Updates Not Working Initially
+### Problem 1: Google OAuth Session Not Persisting After First Sign-Up
+**Issue**: After signing up with Google OAuth for the first time, users had to log in again. The session wasn't persisting after the initial authentication.
+
+**Root Cause**: The OAuth callback route handler was using `cookies()` from `next/headers`, which doesn't properly include cookies in redirect responses. When redirecting after session exchange, the authentication cookies weren't being sent to the browser.
+
+**Solution**: 
+- Modified `/app/auth/callback/route.ts` to use `NextRequest` instead of `Request`
+- Created a Supabase client with proper cookie handlers that update both request and response cookies
+- Ensured cookies are properly included in the redirect response by recreating the response object as cookies are set
+- This ensures authentication cookies persist across the redirect, allowing users to stay logged in after the first sign-up
+
+**Key Code Change**:
+```typescript
+// Before: Using cookies() from next/headers (doesn't work with redirects)
+const supabase = await createClient() // from route-handler.ts
+
+// After: Using NextRequest with proper cookie handling
+const supabase = createServerClient(url, key, {
+  cookies: {
+    get: (name) => request.cookies.get(name)?.value,
+    set: (name, value, options) => {
+      // Update both request and response cookies
+      request.cookies.set({ name, value, ...options })
+      response = NextResponse.redirect(redirectUrl)
+      response.cookies.set({ name, value, ...options })
+    }
+  }
+})
+```
+
+### Problem 2: Realtime Updates Not Syncing Across Tabs
+**Issue**: When adding a bookmark in one browser tab, it didn't appear in other tabs until manually refreshing. The realtime subscription wasn't working.
+
+**Root Cause**: Multiple issues:
+1. Supabase client was being recreated in each component, causing connection issues
+2. The `fetchBookmarks` function was in the `useEffect` dependency array, causing the subscription to be recreated unnecessarily
+3. The subscription wasn't properly handling all event types
+
+**Solution**:
+- **Created a shared Supabase client instance** in `/lib/supabase/client.ts` that's created once and exported, rather than calling `createClient()` inside components
+- **Fixed dependency array** by using `useRef` to store the latest `fetchBookmarks` function, removing it from the dependency array
+- **Simplified subscription handler** to re-fetch bookmarks on any event (INSERT, DELETE, UPDATE) instead of trying to mutate state directly
+- **Added proper error handling and logging** to debug subscription issues
+- **Ensured Realtime is enabled** in Supabase Dashboard (Database → Replication)
+
+**Key Code Changes**:
+```typescript
+// Before: Creating client in each component
+const supabase = createClient() // Creates new instance each time
+
+// After: Shared instance
+export const supabase = createBrowserClient(url, key) // Created once
+
+// Before: fetchBookmarks in dependency array
+useEffect(() => {
+  // ...
+}, [userId, fetchBookmarks]) // Causes re-subscription
+
+// After: Using ref to avoid dependency
+const fetchBookmarksRef = useRef<() => Promise<void>>()
+useEffect(() => {
+  fetchBookmarksRef.current = fetchBookmarks
+}, [fetchBookmarks])
+
+useEffect(() => {
+  // ...
+  if (fetchBookmarksRef.current) {
+    fetchBookmarksRef.current()
+  }
+}, [userId]) // Only depends on userId
+```
+
+### Problem 3: Real-time Updates Not Working Initially
 **Issue**: When implementing real-time updates using Supabase Realtime, the changes weren't appearing in other browser tabs.
 
 **Solution**: 
 - Ensured that Realtime was enabled for the `bookmarks` table by adding it to the `supabase_realtime` publication
 - Used the `postgres_changes` event listener with proper filtering by `user_id` to only receive updates for the current user
 - Implemented proper cleanup of subscriptions in the `useEffect` return function to prevent memory leaks
-- Added `router.refresh()` calls to ensure the UI updates when changes occur
+- Added comprehensive logging to debug subscription status and events
 
-### Problem 2: Row Level Security (RLS) Policies
+### Problem 4: Browser Cache Issues After Deployment
+**Issue**: After deploying fixes to Vercel, changes weren't appearing in the browser even after refreshing. The browser was serving cached JavaScript bundles.
+
+**Solution**:
+- Always commit and push code changes to trigger Vercel deployment
+- Use hard refresh (`Ctrl+Shift+R` or `Cmd+Shift+R`) to clear browser cache
+- For production, use Incognito/Private windows to test without cache
+- Clear site data in DevTools (Application/Storage tab) for complete cache clear
+- Check Vercel deployment status to ensure latest code is deployed
+
+### Problem 5: Row Level Security (RLS) Policies
 **Issue**: Initially, users could see all bookmarks or couldn't access their own bookmarks due to missing or incorrect RLS policies.
 
 **Solution**:
@@ -110,7 +192,7 @@ A simple bookmark manager built with Next.js, Supabase, and Tailwind CSS. Featur
 - All policies check that `auth.uid() = user_id` to ensure users can only access their own data
 - Enabled RLS on the table with `ALTER TABLE bookmarks ENABLE ROW LEVEL SECURITY`
 
-### Problem 3: Authentication State Management
+### Problem 6: Authentication State Management
 **Issue**: The authentication state wasn't persisting correctly across page refreshes, and the user session wasn't being maintained.
 
 **Solution**:
@@ -119,7 +201,7 @@ A simple bookmark manager built with Next.js, Supabase, and Tailwind CSS. Featur
 - Added middleware to refresh user sessions automatically
 - Used `onAuthStateChange` listener in client components to react to auth state changes
 
-### Problem 4: URL Validation and Formatting
+### Problem 7: URL Validation and Formatting
 **Issue**: Users could enter URLs without the `http://` or `https://` prefix, which would break the links.
 
 **Solution**:
@@ -127,7 +209,7 @@ A simple bookmark manager built with Next.js, Supabase, and Tailwind CSS. Featur
 - Automatically prepend `https://` if the URL doesn't start with `http://` or `https://`
 - Used the URL as the default title if no title is provided
 
-### Problem 5: CORS and Redirect Issues with Google OAuth
+### Problem 8: CORS and Redirect Issues with Google OAuth
 **Issue**: Google OAuth redirect wasn't working correctly after authentication.
 
 **Solution**:
@@ -136,7 +218,7 @@ A simple bookmark manager built with Next.js, Supabase, and Tailwind CSS. Featur
 - Ensured redirect URLs were correctly configured in both Supabase and Google OAuth console
 - Used `window.location.origin` to dynamically set the redirect URL based on the current environment
 
-### Problem 6: TypeScript Type Errors
+### Problem 9: TypeScript Type Errors
 **Issue**: Various TypeScript errors related to Supabase types and React component props.
 
 **Solution**:
